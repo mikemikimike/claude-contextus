@@ -204,9 +204,11 @@ All config files support comments and trailing commas. The system strips JSONC b
 - `model` / `ollamaModel` — Global embedding model identifier
 - `dimensions` — Global vector dimensions (must match the model, default: 768)
 
-These embedding-space settings are configured in `plugin.json`. Project-level overrides
-of `provider`, `model`, `ollamaModel`, or `dimensions` are rejected because all projects
-share one LanceDB corpus. Other embedding settings can still be overridden per project.
+These embedding-space settings must remain in the global `plugin.json` configuration.
+Overrides in `~/.contextus/data/<project>/config.json` or
+`.claude/contextus.jsonc` for `provider`, `model`, `ollamaModel`, or `dimensions` are
+rejected at load time because all projects share one LanceDB corpus. Other embedding
+settings can still be overridden per project.
 
 **Sources:**
 - `projectContext.enabled` — Enable project `.claude/context/` (default: `true`)

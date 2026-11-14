@@ -20,7 +20,7 @@ import { glob } from 'glob';
 import matter from 'gray-matter';
 import { addTags } from '../lib/capture/tag-frontmatter.js';
 import { embedSingleFile } from '../lib/embedding/embed-file.js';
-import { projectHash } from '../lib/config.js';
+import { resolveProjectEmbeddingContext } from '../lib/embedding/project-context.js';
 
 const CONTEXT_DIR = path.resolve(process.cwd(), '.claude', 'context');
 
@@ -89,14 +89,16 @@ async function applyTags(relpath: string, tagsCsv: string, embed: boolean): Prom
   fs.writeFileSync(abs, result.content);
   console.log(`✓ ${relpath}: added [${result.added.join(', ')}]`);
   if (embed) {
+    const embeddingContext = resolveProjectEmbeddingContext(process.cwd());
     const r = await embedSingleFile(
       abs,
       CONTEXT_DIR,
-      path.basename(process.cwd()),
+      path.basename(embeddingContext.cwd),
       'projectContext',
-      projectHash(process.cwd()),
+      embeddingContext.projectId,
       'context',
-      process.cwd()
+      embeddingContext.cwd,
+      embeddingContext.scope
     );
     console.log(`  re-embed: ${r.embedded ? 'done' : `skipped (${r.reason})`}`);
   }
