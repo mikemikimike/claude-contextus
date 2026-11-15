@@ -315,12 +315,19 @@ test('full rebuild rejects mismatched provider vectors before creating the table
     fs.mkdirSync(contextDir, { recursive: true });
     fs.writeFileSync(
       path.join(home, 'plugin.json'),
-      JSON.stringify({ config: { embedding: { provider: 'ollama', dimensions: 7 } } })
+      JSON.stringify({
+        config: {
+          embedding: {
+            provider: 'ollama',
+            dimensions: 7,
+            ollamaEndpoint: `http://127.0.0.1:${address.port}`
+          }
+        }
+      })
     );
     fs.writeFileSync(
       configPath,
       JSON.stringify({
-        providers: { ollama: { endpoint: `http://127.0.0.1:${address.port}` } },
         sources: {
           projectContext: { enabled: true, path: contextDir },
           projectMemory: { enabled: false },

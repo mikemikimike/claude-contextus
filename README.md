@@ -205,8 +205,8 @@ Only include the keys you're overriding. The shape (from `plugin.json`):
 
 The embedding provider, model (`model` or `ollamaModel`), and dimensions are
 global settings in `plugin.json`. Project-level overrides of these fields are
-rejected because all projects share one embedding database. Other embedding
-settings can still be overridden per project.
+rejected because all projects share one embedding database. Embedding generation
+also uses the global endpoint and transformer settings.
 
 ```json
 {

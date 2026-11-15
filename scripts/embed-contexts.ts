@@ -23,7 +23,7 @@
  * gets the nomic `search_document:` prefix automatically (see lib/embedder).
  */
 
-import { loadConfig, loadProjectConfig, resolveDBPath, projectHash } from '../lib/config.js';
+import { loadProjectConfig, resolveDBPath, projectHash } from '../lib/config.js';
 import { findPrefixTypeMismatches } from '../lib/embedding/context-loader.js';
 import { resolveSources, loadAllSources } from '../lib/embedding/sources.js';
 import {
@@ -40,9 +40,8 @@ async function main(): Promise<void> {
 
   // Load config with 3-tier merge (plugin.json → ~/.contextus/data/<project>/config.json → .claude/contextus.jsonc)
   const cfg = loadProjectConfig(projectId, process.cwd());
-  const projectEmbeddingContext = snapshotEmbeddingContext({ projectId, cwd: process.cwd() });
-  const sharedEmbeddingContext = snapshotEmbeddingContext();
-  const embedding = loadConfig().embedding;
+  const embeddingContext = snapshotEmbeddingContext();
+  const embedding = embeddingContext.embedding;
   const { provider, model, ollamaModel } = embedding;
   const modelId = provider === 'ollama' ? ollamaModel : model;
 
@@ -133,12 +132,11 @@ async function main(): Promise<void> {
   console.log(`\nEmbedding ${totalChunks} chunks from ${sourced.length} files…`);
   const vectors: number[][] = [];
   let embeddedCount = 0;
-  for (const { pending, scope } of planned) {
-    const context = scope === 'user' ? sharedEmbeddingContext : projectEmbeddingContext;
+  for (const { pending } of planned) {
     const batch = await embedDocuments(
       pending.map((p) => p.embedText),
       (done) => process.stdout.write(`\r  ${embeddedCount + done}/${totalChunks}`),
-      context
+      embeddingContext
     );
     assertEmbeddingDimensions(batch, embedding.dimensions);
     vectors.push(...batch);

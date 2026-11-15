@@ -23,7 +23,7 @@
  */
 
 import { pipeline, type FeatureExtractionPipeline } from '@xenova/transformers';
-import { loadConfig, loadProjectConfig, type ContextusConfig } from '../config.js';
+import { loadConfig, type ContextusConfig } from '../config.js';
 import {
   configureTransformersEnv,
   modelUnavailableError,
@@ -34,42 +34,16 @@ import {
 export const DOCUMENT_PREFIX = 'search_document: ';
 export const QUERY_PREFIX = 'search_query: ';
 
-export interface EmbeddingContext {
-  projectId?: string;
-  cwd?: string;
-}
+export type EmbeddingContextSnapshot = ContextusConfig;
 
-export interface EmbeddingContextSnapshot extends EmbeddingContext {
-  config: ContextusConfig;
-}
-
-type EmbeddingContextInput = EmbeddingContext | EmbeddingContextSnapshot;
-
-function contextConfig(context?: EmbeddingContextInput): ContextusConfig {
-  return context && 'config' in context
-    ? context.config
-    : loadProjectConfig(context?.projectId, context?.cwd);
-}
-
-function embeddingConfig(context?: EmbeddingContext | EmbeddingContextSnapshot) {
-  const project = contextConfig(context).embedding;
-  const shared = loadConfig().embedding;
-  return {
-    ...project,
-    provider: shared.provider,
-    model: shared.model,
-    ollamaModel: shared.ollamaModel,
-    dimensions: shared.dimensions
-  };
+function embeddingConfig(context?: EmbeddingContextSnapshot) {
+  return (context ?? loadConfig()).embedding;
 }
 
 export function snapshotEmbeddingContext(
-  context?: EmbeddingContextInput
+  context?: EmbeddingContextSnapshot
 ): EmbeddingContextSnapshot {
-  return {
-    ...context,
-    config: structuredClone(contextConfig(context))
-  };
+  return structuredClone(context ?? loadConfig());
 }
 
 /** Fail before persistence when a provider emits vectors outside the configured space. */
@@ -146,7 +120,7 @@ let _pipe: Promise<FeatureExtractionPipeline> | null = null;
 let _pipeModel: string | null = null;
 let _pipelineLoadQueue: Promise<void> = Promise.resolve();
 
-function getPipeline(context?: EmbeddingContextInput): Promise<FeatureExtractionPipeline> {
+function getPipeline(context?: EmbeddingContextSnapshot): Promise<FeatureExtractionPipeline> {
   const { model, transformers } = embeddingConfig(context);
   const key = JSON.stringify([model, transformers]);
   if (!_pipe || _pipeModel !== key) {
@@ -175,7 +149,10 @@ function getPipeline(context?: EmbeddingContextInput): Promise<FeatureExtraction
   return _pipe;
 }
 
-async function embedTransformers(text: string, context?: EmbeddingContextInput): Promise<number[]> {
+async function embedTransformers(
+  text: string,
+  context?: EmbeddingContextSnapshot
+): Promise<number[]> {
   const pipe = await getPipeline(context);
   const output = await pipe(text, { pooling: 'mean', normalize: true });
   return Array.from(output.data as Float32Array);
@@ -187,10 +164,10 @@ interface OllamaEmbeddingResponse {
   embedding: number[];
 }
 
-async function embedOllama(text: string, context?: EmbeddingContextInput): Promise<number[]> {
+async function embedOllama(text: string, context?: EmbeddingContextSnapshot): Promise<number[]> {
   const cfg = embeddingConfig(context);
   const { ollamaModel } = cfg;
-  const ollamaEndpoint = cfg.ollamaEndpoint || contextConfig(context).providers.ollama.endpoint;
+  const ollamaEndpoint = cfg.ollamaEndpoint || (context ?? loadConfig()).providers.ollama.endpoint;
   const res = await fetch(`${ollamaEndpoint}/api/embeddings`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -210,7 +187,7 @@ async function embedOllama(text: string, context?: EmbeddingContextInput): Promi
 /* ── Public API (provider-dispatching) ────────────────────────────────────── */
 
 /** Embed text exactly as given (no prefix). Mean-pooled + L2-normalized. */
-async function embedRaw(text: string, context?: EmbeddingContextInput): Promise<number[]> {
+async function embedRaw(text: string, context?: EmbeddingContextSnapshot): Promise<number[]> {
   const { provider, dimensions } = embeddingConfig(context);
   if (fakeEmbedEnabled()) return fakeDeterministicVector(text, dimensions);
   return provider === 'ollama' ? embedOllama(text, context) : embedTransformers(text, context);
@@ -221,7 +198,7 @@ async function embedRaw(text: string, context?: EmbeddingContextInput): Promise<
  * Call at daemon start so the first real query isn't slow — and so a
  * model/dimension mismatch fails fast (DESIGN.md §"dimensions must match").
  */
-export async function warmup(context?: EmbeddingContextInput): Promise<void> {
+export async function warmup(context = snapshotEmbeddingContext()): Promise<void> {
   const { dimensions, provider, model, ollamaModel } = embeddingConfig(context);
   // Transformers.js: fail fast with an actionable message if the model is
   // neither bundled nor reachable, instead of a slow opaque pipeline() error.
@@ -239,12 +216,15 @@ export async function warmup(context?: EmbeddingContextInput): Promise<void> {
 }
 
 /** Embed a single stored passage (document side — `search_document:` prefix). */
-export function embedDocument(text: string, context?: EmbeddingContextInput): Promise<number[]> {
+export function embedDocument(
+  text: string,
+  context = snapshotEmbeddingContext()
+): Promise<number[]> {
   return embedRaw(prefixesEnabled() ? DOCUMENT_PREFIX + text : text, context);
 }
 
 /** Embed a single query (query side — `search_query:` prefix). */
-export function embedQuery(text: string, context?: EmbeddingContextInput): Promise<number[]> {
+export function embedQuery(text: string, context = snapshotEmbeddingContext()): Promise<number[]> {
   return embedRaw(prefixesEnabled() ? QUERY_PREFIX + text : text, context);
 }
 
@@ -256,7 +236,7 @@ export function embedQuery(text: string, context?: EmbeddingContextInput): Promi
 export async function embedDocuments(
   texts: string[],
   onProgress?: (done: number, total: number) => void,
-  context?: EmbeddingContextInput
+  context?: EmbeddingContextSnapshot
 ): Promise<number[][]> {
   const snapshot = snapshotEmbeddingContext(context);
   const out: number[][] = [];

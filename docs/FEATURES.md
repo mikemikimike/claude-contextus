@@ -207,8 +207,8 @@ All config files support comments and trailing commas. The system strips JSONC b
 These embedding-space settings must remain in the global `plugin.json` configuration.
 Overrides in `~/.contextus/data/<project>/config.json` or
 `.claude/contextus.jsonc` for `provider`, `model`, `ollamaModel`, or `dimensions` are
-rejected at load time because all projects share one LanceDB corpus. Other embedding
-settings can still be overridden per project.
+rejected at load time because all projects share one LanceDB corpus. Embedding
+generation also uses the global endpoint and transformer settings.
 
 **Sources:**
 - `projectContext.enabled` — Enable project `.claude/context/` (default: `true`)
@@ -220,7 +220,7 @@ settings can still be overridden per project.
 
 #### Daemon
 - **Single shared instance** — One daemon across all projects, model loaded once
-- **Project isolation** — Per-project LanceDB dir, config merging
+- **Project isolation** — Project-scoped rows in a shared LanceDB, with config merging
 - **HTTP API** — Localhost-only server (default port: 37800)
 - **Auto-start** — SessionStart hook spawns daemon if not running
 - **Node stdlib** — No framework dependencies in hot path

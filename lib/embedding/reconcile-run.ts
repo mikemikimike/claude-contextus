@@ -29,7 +29,6 @@ import {
   upsertRows,
   type ContextRow
 } from '../storage/lance-client.js';
-import { loadConfig } from '../config.js';
 
 /** Outcome of a reconcile, for logging + the session-start systemMessage. */
 export interface ReconcileResult {
@@ -67,7 +66,7 @@ export async function runReconcile(
     ? scope === 'user'
     : source === 'userContext' || source === 'userDocs' || source === 'userMemory';
   if (sharedSource) projectId = '__user__';
-  const embeddingContext = snapshotEmbeddingContext(sharedSource ? undefined : { projectId, cwd });
+  const embeddingContext = snapshotEmbeddingContext();
   const { contexts: allContexts, failed: loadFailed } = await loadContexts(contextDir, exclude);
   // Quarantine prefix/type-mismatch files: they can't embed (the gate rejects them),
   // so if reconcile kept them in the disk set planReconcile would mark them "new"
@@ -97,7 +96,7 @@ export async function runReconcile(
 
   // Cold start: no table yet → chunk + build it from every file in one shot.
   if (plan.state === 'missing') {
-    const cfg = loadConfig().embedding;
+    const cfg = embeddingContext.embedding;
     const now = new Date().toISOString();
     const rows: ContextRow[] = [];
     for (const c of contexts) {

@@ -20,7 +20,6 @@ import {
   assertEmbeddingDimensions,
   embedDocuments,
   snapshotEmbeddingContext,
-  type EmbeddingContext,
   type EmbeddingContextSnapshot
 } from './embedder.js';
 import {
@@ -32,7 +31,6 @@ import {
 } from '../storage/lance-client.js';
 import { isStale } from '../storage/staleness.js';
 import { planChunks, buildRows } from './file-to-rows.js';
-import { loadConfig } from '../config.js';
 
 /** Outcome of an incremental embed attempt. */
 export interface EmbedFileResult {
@@ -59,17 +57,15 @@ export async function embedSingleFile(
   source = 'projectContext',
   projectId = '',
   sourceType?: string,
-  cwd?: string,
+  _cwd?: string,
   scope?: 'project' | 'user',
-  snapshot?: EmbeddingContext | EmbeddingContextSnapshot
+  snapshot?: EmbeddingContextSnapshot
 ): Promise<EmbedFileResult> {
   const sharedSource = scope
     ? scope === 'user'
     : source === 'userContext' || source === 'userDocs' || source === 'userMemory';
   if (sharedSource) projectId = '__user__';
-  const embeddingContext = snapshotEmbeddingContext(
-    snapshot ?? (sharedSource ? undefined : { projectId, cwd })
-  );
+  const embeddingContext = snapshotEmbeddingContext(snapshot);
   const normFile = path.resolve(absFile);
   const normDir = path.resolve(contextDir);
   if (!normFile.startsWith(normDir + path.sep)) {
@@ -136,7 +132,7 @@ export async function embedSingleFile(
     undefined,
     embeddingContext
   );
-  const cfg = loadConfig().embedding;
+  const cfg = embeddingContext.embedding;
   assertEmbeddingDimensions(vectors, cfg.dimensions);
   assertTableMetaCompatible(cfg, cfg.dimensions, projectName, await tableExists(projectName));
   const rows = buildRows(ctx, pending, vectors, source, new Date().toISOString(), projectId);

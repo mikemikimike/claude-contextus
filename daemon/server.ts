@@ -36,7 +36,7 @@ import { loadConfig, loadProjectConfig, expandHome, projectHash } from '../lib/c
 // ESM equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import { warmup, embedQuery } from '../lib/embedding/embedder.js';
+import { warmup, embedQuery, snapshotEmbeddingContext } from '../lib/embedding/embedder.js';
 import {
   search,
   tableExists,
@@ -201,28 +201,10 @@ async function handleHealth(req: http.IncomingMessage, res: http.ServerResponse)
 
   // Liveness probe: if model appears warm, verify the provider is still up.
   const url = new URL(req.url ?? '/', BASE_URL());
-  if (
-    url.searchParams.get('probe') === 'true' &&
-    (modelLoaded || url.searchParams.has('project') || url.searchParams.has('cwd'))
-  ) {
+  if (url.searchParams.get('probe') === 'true' && modelLoaded) {
     try {
-      const healthProject = url.searchParams.get('project') || undefined;
-      const healthCwd = url.searchParams.get('cwd') || undefined;
-      await embedQuery('health', {
-        projectId: healthProject
-          ? resolveProjectId(healthProject)
-          : healthCwd
-            ? projectHash(healthCwd)
-            : undefined,
-        cwd: healthCwd
-      });
+      await embedQuery('health');
     } catch (err) {
-      if (url.searchParams.get('project') || url.searchParams.get('cwd')) {
-        return sendJson(res, 503, {
-          status: 'degraded',
-          error: err instanceof Error ? err.message : String(err)
-        });
-      }
       modelLoaded = false;
       warmupError = err instanceof Error ? err.message : String(err);
       logError('warn', 'embedder', 'Health probe failed — provider down, triggering re-warmup', {
@@ -292,7 +274,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
   // Model not warm yet (still loading, or warmup failed) → degrade. Embedding
   // now would throw deep in the provider; the cold first prompt or two missing
   // context is the documented graceful-degradation behavior.
-  if (!modelLoaded && !projectId) {
+  if (!modelLoaded) {
     logInfo('Query before model warm — skipping', { project: projectLabel });
     return sendJson(res, 200, { continue: true });
   }
@@ -311,7 +293,8 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
   // machine-local → git-committed), so each project calibrates independently.
   const cfg = loadProjectConfig(projectId, cwd);
   const meta = readTableMeta(projectId);
-  const embedding = loadConfig().embedding;
+  const embeddingContext = snapshotEmbeddingContext();
+  const embedding = embeddingContext.embedding;
   const activeModel = embedding.provider === 'ollama' ? embedding.ollamaModel : embedding.model;
   if (meta && (meta.provider !== embedding.provider || meta.embeddingModel !== activeModel)) {
     logError('error', 'daemon', 'Embedding model mismatch (corpus vs daemon)', {
@@ -428,7 +411,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     const fetchLimit = effectiveTopK * CHUNK_FANOUT;
 
     // Always start with semantic search (workspace-scoped)
-    const vec = await embedQuery(prompt, { projectId, cwd });
+    const vec = await embedQuery(prompt, embeddingContext);
     raw = await search(vec, fetchLimit, undefined, projectId, projectScope);
 
     if (cfg.retrieval.hybrid === 'always') {
@@ -456,10 +439,8 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     // Provider dropped mid-session — mark down and trigger re-warmup so the
     // daemon recovers automatically once the provider comes back.
     const failure = embedErr instanceof Error ? embedErr.message : String(embedErr);
-    if (!projectId) {
-      modelLoaded = false;
-      warmupError = failure;
-    }
+    modelLoaded = false;
+    warmupError = failure;
     logError(
       'warn',
       'embedder',
@@ -469,10 +450,8 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
         message: failure
       }
     );
-    if (!projectId) {
-      if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
-      attemptWarmup();
-    }
+    if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
+    attemptWarmup();
 
     // Try keyword fallback before giving up entirely
     const corpus = await loadCorpusForKeyword(projectId, projectScope);
@@ -546,7 +525,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
       const variantLimit = cfg.retrieval.topK * 2;
       const variantSearches = await Promise.all(
         expanded.variants.map(async (variant) => {
-          const vVec = await embedQuery(variant, { projectId, cwd });
+          const vVec = await embedQuery(variant, embeddingContext);
           return search(vVec, variantLimit, undefined, projectId, projectScope);
         })
       );
@@ -1625,7 +1604,7 @@ async function handleReconcile(
   if (reconcileTasks.some((t) => reconcilingSources.has(t.sourcePath))) {
     return sendJson(res, 200, { state: 'busy' });
   }
-  if (!modelLoaded && !projectId) {
+  if (!modelLoaded) {
     // Can't embed without the model; the caller can retry once /health is warm.
     return sendJson(res, 200, { state: 'cold', reason: 'model_not_loaded' });
   }
@@ -1737,7 +1716,7 @@ export function requestHandler(req: http.IncomingMessage, res: http.ServerRespon
           return sendJson(res, 200, { results: [] });
         }
 
-        if (!modelLoaded && !projectId) {
+        if (!modelLoaded) {
           return sendJson(res, 503, { error: 'Model not loaded yet' });
         }
 
@@ -1745,7 +1724,8 @@ export function requestHandler(req: http.IncomingMessage, res: http.ServerRespon
           return sendJson(res, 200, { results: [] });
         }
 
-        const searchCfg = loadConfig().embedding;
+        const searchContext = snapshotEmbeddingContext();
+        const searchCfg = searchContext.embedding;
         const searchMeta = readTableMeta(projectId);
         const searchModel =
           searchCfg.provider === 'ollama' ? searchCfg.ollamaModel : searchCfg.model;
@@ -1759,7 +1739,7 @@ export function requestHandler(req: http.IncomingMessage, res: http.ServerRespon
         }
 
         try {
-          const vec = await embedQuery(query, { projectId, cwd });
+          const vec = await embedQuery(query, searchContext);
           const raw = await search(vec, limit * 4, undefined, projectId, projectScope);
 
           // Return raw results with scores, no floor filtering
