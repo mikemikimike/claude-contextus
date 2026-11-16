@@ -29,6 +29,7 @@ import {
   tableExists,
   assertTableMetaCompatible
 } from '../storage/lance-client.js';
+import { loadProjectConfig } from '../config.js';
 import { isStale } from '../storage/staleness.js';
 import { planChunks, buildRows } from './file-to-rows.js';
 
@@ -57,7 +58,7 @@ export async function embedSingleFile(
   source = 'projectContext',
   projectId = '',
   sourceType?: string,
-  _cwd?: string,
+  cwd?: string,
   scope?: 'project' | 'user',
   snapshot?: EmbeddingContextSnapshot
 ): Promise<EmbedFileResult> {
@@ -65,7 +66,9 @@ export async function embedSingleFile(
     ? scope === 'user'
     : source === 'userContext' || source === 'userDocs' || source === 'userMemory';
   if (sharedSource) projectId = '__user__';
-  const embeddingContext = snapshotEmbeddingContext(snapshot);
+  const embeddingContext = snapshotEmbeddingContext(
+    snapshot ?? (sharedSource ? undefined : loadProjectConfig(projectId || undefined, cwd))
+  );
   const normFile = path.resolve(absFile);
   const normDir = path.resolve(contextDir);
   if (!normFile.startsWith(normDir + path.sep)) {

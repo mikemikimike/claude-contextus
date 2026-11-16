@@ -293,7 +293,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
   // machine-local → git-committed), so each project calibrates independently.
   const cfg = loadProjectConfig(projectId, cwd);
   const meta = readTableMeta(projectId);
-  const embeddingContext = snapshotEmbeddingContext();
+  const embeddingContext = snapshotEmbeddingContext(cfg);
   const embedding = embeddingContext.embedding;
   const activeModel = embedding.provider === 'ollama' ? embedding.ollamaModel : embedding.model;
   if (meta && (meta.provider !== embedding.provider || meta.embeddingModel !== activeModel)) {
@@ -1724,7 +1724,8 @@ export function requestHandler(req: http.IncomingMessage, res: http.ServerRespon
           return sendJson(res, 200, { results: [] });
         }
 
-        const searchContext = snapshotEmbeddingContext();
+        const searchConfig = projectId ? loadProjectConfig(projectId, cwd) : loadConfig();
+        const searchContext = snapshotEmbeddingContext(searchConfig);
         const searchCfg = searchContext.embedding;
         const searchMeta = readTableMeta(projectId);
         const searchModel =

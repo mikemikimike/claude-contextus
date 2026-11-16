@@ -40,8 +40,9 @@ async function main(): Promise<void> {
 
   // Load config with 3-tier merge (plugin.json → ~/.contextus/data/<project>/config.json → .claude/contextus.jsonc)
   const cfg = loadProjectConfig(projectId, process.cwd());
-  const embeddingContext = snapshotEmbeddingContext();
-  const embedding = embeddingContext.embedding;
+  const projectEmbeddingContext = snapshotEmbeddingContext(cfg);
+  const sharedEmbeddingContext = snapshotEmbeddingContext();
+  const embedding = sharedEmbeddingContext.embedding;
   const { provider, model, ollamaModel } = embedding;
   const modelId = provider === 'ollama' ? ollamaModel : model;
 
@@ -132,13 +133,14 @@ async function main(): Promise<void> {
   console.log(`\nEmbedding ${totalChunks} chunks from ${sourced.length} files…`);
   const vectors: number[][] = [];
   let embeddedCount = 0;
-  for (const { pending } of planned) {
+  for (const { pending, scope } of planned) {
+    const embeddingContext = scope === 'user' ? sharedEmbeddingContext : projectEmbeddingContext;
     const batch = await embedDocuments(
       pending.map((p) => p.embedText),
       (done) => process.stdout.write(`\r  ${embeddedCount + done}/${totalChunks}`),
       embeddingContext
     );
-    assertEmbeddingDimensions(batch, embedding.dimensions);
+    assertEmbeddingDimensions(batch, embeddingContext.embedding.dimensions);
     vectors.push(...batch);
     embeddedCount += batch.length;
   }

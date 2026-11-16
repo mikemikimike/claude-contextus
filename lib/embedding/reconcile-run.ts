@@ -29,6 +29,7 @@ import {
   upsertRows,
   type ContextRow
 } from '../storage/lance-client.js';
+import { loadProjectConfig } from '../config.js';
 
 /** Outcome of a reconcile, for logging + the session-start systemMessage. */
 export interface ReconcileResult {
@@ -66,7 +67,9 @@ export async function runReconcile(
     ? scope === 'user'
     : source === 'userContext' || source === 'userDocs' || source === 'userMemory';
   if (sharedSource) projectId = '__user__';
-  const embeddingContext = snapshotEmbeddingContext();
+  const embeddingContext = snapshotEmbeddingContext(
+    sharedSource ? undefined : loadProjectConfig(projectId || undefined, cwd)
+  );
   const { contexts: allContexts, failed: loadFailed } = await loadContexts(contextDir, exclude);
   // Quarantine prefix/type-mismatch files: they can't embed (the gate rejects them),
   // so if reconcile kept them in the disk set planReconcile would mark them "new"

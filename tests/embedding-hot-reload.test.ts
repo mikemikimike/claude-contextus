@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { embedDocuments } from '../lib/embedding/embedder.js';
-import { resetConfigCache } from '../lib/config.js';
+import { embedDocuments, snapshotEmbeddingContext } from '../lib/embedding/embedder.js';
+import { loadConfig, loadProjectConfig, projectHash, resetConfigCache } from '../lib/config.js';
 
 test('a batch keeps its embedding model when global config reloads', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-reload-'));
@@ -38,5 +38,72 @@ test('a batch keeps its embedding model when global config reloads', async () =>
     else process.env.CLAUDE_PLUGIN_ROOT = oldRoot;
     resetConfigCache();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('project and shared embedding batches use their own stable config snapshots', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-project-snapshot-'));
+  const pluginRoot = path.join(home, 'plugin');
+  const cwd = path.join(home, 'project');
+  const oldHome = process.env.HOME;
+  const oldProfile = process.env.USERPROFILE;
+  const oldRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const oldFetch = globalThis.fetch;
+  const endpoints: string[] = [];
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
+  fs.writeFileSync(
+    path.join(pluginRoot, 'plugin.json'),
+    JSON.stringify({
+      config: {
+        embedding: { provider: 'ollama', ollamaModel: 'shared-model', dimensions: 2 },
+        providers: { ollama: { endpoint: 'http://global.test' } }
+      }
+    })
+  );
+  fs.writeFileSync(
+    path.join(cwd, '.claude', 'contextus.json'),
+    JSON.stringify({ providers: { ollama: { endpoint: 'http://project.test' } } })
+  );
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+  resetConfigCache();
+  globalThis.fetch = async (input) => {
+    endpoints.push(String(input));
+    if (endpoints.length === 1) {
+      fs.writeFileSync(
+        path.join(cwd, '.claude', 'contextus.json'),
+        JSON.stringify({ providers: { ollama: { endpoint: 'http://reloaded.test' } } })
+      );
+      resetConfigCache();
+    }
+    return new Response(JSON.stringify({ embedding: [1, 1] }), { status: 200 });
+  };
+  try {
+    const projectConfig = loadProjectConfig(projectHash(cwd), cwd);
+    const projectContext = snapshotEmbeddingContext(projectConfig);
+    const sharedContext = snapshotEmbeddingContext(loadConfig());
+    assert.equal(projectContext.providers.ollama.endpoint, 'http://project.test');
+    assert.equal(sharedContext.providers.ollama.endpoint, 'http://global.test');
+
+    await embedDocuments(['project row', 'another project row'], undefined, projectContext);
+    await embedDocuments(['shared user row'], undefined, sharedContext);
+
+    assert.deepEqual(endpoints, [
+      'http://project.test/api/embeddings',
+      'http://project.test/api/embeddings',
+      'http://global.test/api/embeddings'
+    ]);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldHome === undefined) delete process.env.HOME;
+    else process.env.HOME = oldHome;
+    if (oldProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = oldProfile;
+    if (oldRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    else process.env.CLAUDE_PLUGIN_ROOT = oldRoot;
+    resetConfigCache();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

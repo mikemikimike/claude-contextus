@@ -208,7 +208,8 @@ These embedding-space settings must remain in the global `plugin.json` configura
 Overrides in `~/.contextus/data/<project>/config.json` or
 `.claude/contextus.jsonc` for `provider`, `model`, `ollamaModel`, or `dimensions` are
 rejected at load time because all projects share one LanceDB corpus. Embedding
-generation also uses the global endpoint and transformer settings.
+generation uses the merged project settings for project-scoped sources; shared
+user sources continue to use the global embedding settings.
 
 **Sources:**
 - `projectContext.enabled` — Enable project `.claude/context/` (default: `true`)
