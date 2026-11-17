@@ -565,13 +565,22 @@ function readConfigFile(filePath: string): Record<string, any> | null {
 
 function validateProjectEmbeddingConfig(config: Record<string, unknown>, filePath: string): void {
   const embedding = config.embedding;
-  if (!embedding || typeof embedding !== 'object') return;
-  const restricted = ['provider', 'model', 'ollamaModel', 'dimensions'].filter((key) =>
-    Object.prototype.hasOwnProperty.call(embedding, key)
-  );
+  const restricted: string[] = [];
+  if (embedding && typeof embedding === 'object') {
+    restricted.push(
+      ...[
+        'provider',
+        'model',
+        'ollamaModel',
+        'dimensions',
+        'ollamaEndpoint',
+        'transformers'
+      ].filter((key) => Object.prototype.hasOwnProperty.call(embedding, key))
+    );
+  }
   if (restricted.length > 0) {
     throw new Error(
-      `Project configuration ${filePath} cannot override embedding settings: ${restricted.join(', ')}. Configure them globally because the embedding database is shared.`
+      `Project configuration ${filePath} cannot override embedding settings: ${restricted.join(', ')}. Configure embedding sources globally because project and shared rows use one embedding space.`
     );
   }
 }

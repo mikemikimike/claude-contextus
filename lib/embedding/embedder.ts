@@ -40,10 +40,20 @@ function embeddingConfig(context?: EmbeddingContextSnapshot) {
   return (context ?? loadConfig()).embedding;
 }
 
+/** Keep project tuning while pinning vectors to the shared global embedding source. */
 export function snapshotEmbeddingContext(
   context?: EmbeddingContextSnapshot
 ): EmbeddingContextSnapshot {
-  return structuredClone(context ?? loadConfig());
+  const globalConfig = loadConfig();
+  const snapshot = structuredClone(context ?? globalConfig);
+  snapshot.embedding.provider = globalConfig.embedding.provider;
+  snapshot.embedding.model = globalConfig.embedding.model;
+  snapshot.embedding.ollamaModel = globalConfig.embedding.ollamaModel;
+  snapshot.embedding.dimensions = globalConfig.embedding.dimensions;
+  snapshot.embedding.ollamaEndpoint = globalConfig.embedding.ollamaEndpoint;
+  snapshot.embedding.transformers = structuredClone(globalConfig.embedding.transformers);
+  snapshot.providers.ollama.endpoint = globalConfig.providers.ollama.endpoint;
+  return snapshot;
 }
 
 /** Fail before persistence when a provider emits vectors outside the configured space. */
@@ -238,7 +248,8 @@ export async function embedDocuments(
   onProgress?: (done: number, total: number) => void,
   context?: EmbeddingContextSnapshot
 ): Promise<number[][]> {
-  const snapshot = snapshotEmbeddingContext(context);
+  // A caller-supplied context is already pinned to this operation's source snapshot.
+  const snapshot = context ? structuredClone(context) : snapshotEmbeddingContext();
   const out: number[][] = [];
   for (let i = 0; i < texts.length; i++) {
     out.push(await embedDocument(texts[i], snapshot));

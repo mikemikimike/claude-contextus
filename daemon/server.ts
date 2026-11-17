@@ -399,6 +399,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
   // keyword-only (with auto-recovery trigger) so users get SOME context rather than complete silence.
   let raw: Awaited<ReturnType<typeof search>>;
   let usedKeywordFallback = false;
+  let embeddingFailed = false;
   let hybridStatus: LastInjectionDebug['hybrid'] =
     cfg.retrieval.hybrid === 'off'
       ? 'off'
@@ -411,7 +412,13 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     const fetchLimit = effectiveTopK * CHUNK_FANOUT;
 
     // Always start with semantic search (workspace-scoped)
-    const vec = await embedQuery(prompt, embeddingContext);
+    let vec: number[];
+    try {
+      vec = await embedQuery(prompt, embeddingContext);
+    } catch (err) {
+      embeddingFailed = true;
+      throw err;
+    }
     raw = await search(vec, fetchLimit, undefined, projectId, projectScope);
 
     if (cfg.retrieval.hybrid === 'always') {
@@ -436,22 +443,29 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     }
     // hybrid === 'off': pure semantic, keyword only as error fallback (below)
   } catch (embedErr) {
-    // Provider dropped mid-session — mark down and trigger re-warmup so the
-    // daemon recovers automatically once the provider comes back.
     const failure = embedErr instanceof Error ? embedErr.message : String(embedErr);
-    modelLoaded = false;
-    warmupError = failure;
-    logError(
-      'warn',
-      'embedder',
-      'Embedding failed, attempting keyword fallback + triggering re-warmup',
-      {
+    if (embeddingFailed) {
+      // The embedding source is shared globally, so only an embedding failure
+      // should invalidate readiness. Corpus/search failures are project-scoped.
+      modelLoaded = false;
+      warmupError = failure;
+      logError(
+        'warn',
+        'embedder',
+        'Embedding failed, attempting keyword fallback + triggering re-warmup',
+        {
+          project: projectLabel,
+          message: failure
+        }
+      );
+      if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
+      attemptWarmup();
+    } else {
+      logError('warn', 'retrieval', 'Vector retrieval failed, attempting keyword fallback', {
         project: projectLabel,
         message: failure
-      }
-    );
-    if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
-    attemptWarmup();
+      });
+    }
 
     // Try keyword fallback before giving up entirely
     const corpus = await loadCorpusForKeyword(projectId, projectScope);

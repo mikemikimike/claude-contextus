@@ -65,7 +65,7 @@ function writeContextFile(file: string, body: string): void {
   );
 }
 
-test('reconcile and direct incremental embeds use project config while shared rows use global config', async () => {
+test('project and shared rows use one global embedding source with project retrieval settings', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-project-embed-home-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-project-embed-cwd-'));
   const { server, endpoint, requests } = await startEmbeddingServer();
@@ -79,7 +79,10 @@ test('reconcile and direct incremental embeds use project config while shared ro
   fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
   fs.writeFileSync(
     path.join(project, '.claude', 'contextus.json'),
-    JSON.stringify({ providers: { ollama: { endpoint: `${endpoint}/project` } } })
+    JSON.stringify({
+      providers: { ollama: { endpoint: `${endpoint}/project` } },
+      retrieval: { topK: 6 }
+    })
   );
   writeContextFile(contextFile, 'initial project context');
 
@@ -108,7 +111,7 @@ test('reconcile and direct incremental embeds use project config while shared ro
       'project'
     );
     assert.equal(reconciled.embedded, 1);
-    assert.equal(requests.at(-1), '/project/api/embeddings');
+    assert.equal(requests.at(-1), '/global/api/embeddings');
 
     writeContextFile(contextFile, 'updated project context');
     const incremental = await embedSingleFile(
@@ -122,7 +125,7 @@ test('reconcile and direct incremental embeds use project config while shared ro
       'project'
     );
     assert.equal(incremental.embedded, true);
-    assert.equal(requests.at(-1), '/project/api/embeddings');
+    assert.equal(requests.at(-1), '/global/api/embeddings');
 
     const sharedDocs = path.join(home, '.contextus', 'docs');
     writeContextFile(path.join(sharedDocs, 'guide.md'), 'shared user context');
@@ -138,6 +141,7 @@ test('reconcile and direct incremental embeds use project config while shared ro
     );
     assert.equal(shared.embedded, 1);
     assert.equal(requests.at(-1), '/global/api/embeddings');
+    assert.deepEqual(requests, Array(3).fill('/global/api/embeddings'));
   } finally {
     resetConnection();
     resetConfigCache();
@@ -157,7 +161,7 @@ test('reconcile and direct incremental embeds use project config while shared ro
   }
 });
 
-test('full rebuild embeds project and shared sources with their respective config snapshots', async () => {
+test('full rebuild embeds project and shared sources with one global embedding source', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-rebuild-embed-home-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-rebuild-embed-cwd-'));
   const { server, endpoint, requests } = await startEmbeddingServer();
@@ -174,6 +178,7 @@ test('full rebuild embeds project and shared sources with their respective confi
     path.join(project, '.claude', 'contextus.json'),
     JSON.stringify({
       providers: { ollama: { endpoint: `${endpoint}/project` } },
+      retrieval: { topK: 6 },
       sources: {
         projectContext: {
           enabled: true,
@@ -198,8 +203,8 @@ test('full rebuild embeds project and shared sources with their respective confi
       CONTEXTUS_TEST_FAKE_EMBED: '0'
     });
     assert.match(output, /Embedded/);
-    assert.ok(requests.includes('/project/api/embeddings'));
-    assert.ok(requests.includes('/global/api/embeddings'));
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests, Array(2).fill('/global/api/embeddings'));
   } finally {
     if (oldHome === undefined) delete process.env.HOME;
     else process.env.HOME = oldHome;

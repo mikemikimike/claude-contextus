@@ -98,7 +98,7 @@ test('loadProjectConfig: empty project → falls back to global', () => {
   assert.equal(loadProjectConfig(undefined), loadConfig());
 });
 
-test('project tiers reject embedding space overrides while accepting other embedding settings', () => {
+test('project tiers reject embedding source overrides while preserving other project settings', () => {
   cleanup();
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-embedding-cfg-'));
   const local = projectLocalConfigPath(PROJ);
@@ -106,7 +106,14 @@ test('project tiers reject embedding space overrides while accepting other embed
   try {
     fs.mkdirSync(path.dirname(local), { recursive: true });
     fs.mkdirSync(path.dirname(repo), { recursive: true });
-    for (const key of ['provider', 'model', 'ollamaModel', 'dimensions']) {
+    for (const key of [
+      'provider',
+      'model',
+      'ollamaModel',
+      'dimensions',
+      'ollamaEndpoint',
+      'transformers'
+    ]) {
       fs.writeFileSync(local, JSON.stringify({ embedding: { [key]: 'invalid' } }));
       resetConfigCache();
       assert.throws(
@@ -122,13 +129,19 @@ test('project tiers reject embedding space overrides while accepting other embed
       );
       fs.writeFileSync(repo, '{}');
     }
-    fs.writeFileSync(
-      repo,
-      JSON.stringify({ embedding: { batchSize: 3, transformers: { allowRemoteModels: false } } })
-    );
+    for (const tier of ['local', 'repo'] as const) {
+      const target = tier === 'local' ? local : repo;
+      fs.writeFileSync(
+        target,
+        JSON.stringify({ providers: { ollama: { endpoint: 'http://project.test' } } })
+      );
+      resetConfigCache();
+      assert.equal(loadProjectConfig(PROJ, cwd).providers.ollama.endpoint, 'http://project.test');
+      fs.writeFileSync(target, '{}');
+    }
+    fs.writeFileSync(repo, JSON.stringify({ embedding: { batchSize: 3 } }));
     resetConfigCache();
     assert.equal(loadProjectConfig(PROJ, cwd).embedding.batchSize, 3);
-    assert.equal(loadProjectConfig(PROJ, cwd).embedding.transformers?.allowRemoteModels, false);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
     cleanup();

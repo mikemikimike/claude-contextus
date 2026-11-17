@@ -203,11 +203,14 @@ Config resolves through **3 tiers (later wins)**:
 
 Only include the keys you're overriding. The shape (from `plugin.json`):
 
-The embedding provider, model (`model` or `ollamaModel`), and dimensions are
-global settings in `plugin.json`. Project-level overrides of these fields are
-rejected because all projects share one embedding database. Other embedding
-settings, including Transformers.js model resolution, can be overridden per
-project. Shared user sources continue to use the global embedding settings.
+The embedding source must be configured globally in `plugin.json`: provider,
+model (`model` or `ollamaModel`), dimensions, Transformers.js model resolution,
+and the Ollama endpoint used for embedding. Project-level overrides of these
+embedding settings are rejected because project rows and shared user rows use
+one vector space. A project-level `providers.ollama.endpoint` can still serve
+other Ollama features, but embedding requests always use the global endpoint.
+Non-source settings such as `embedding.batchSize` and retrieval tuning can still
+be set per project.
 
 ```json
 {

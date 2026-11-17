@@ -41,7 +41,7 @@ test('a batch keeps its embedding model when global config reloads', async () =>
   }
 });
 
-test('project and shared embedding batches use their own stable config snapshots', async () => {
+test('project and shared embedding batches keep one global source snapshot across reloads', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-project-snapshot-'));
   const pluginRoot = path.join(home, 'plugin');
   const cwd = path.join(home, 'project');
@@ -63,7 +63,10 @@ test('project and shared embedding batches use their own stable config snapshots
   );
   fs.writeFileSync(
     path.join(cwd, '.claude', 'contextus.json'),
-    JSON.stringify({ providers: { ollama: { endpoint: 'http://project.test' } } })
+    JSON.stringify({
+      providers: { ollama: { endpoint: 'http://project.test' } },
+      retrieval: { topK: 6 }
+    })
   );
   process.env.HOME = home;
   process.env.USERPROFILE = home;
@@ -73,8 +76,13 @@ test('project and shared embedding batches use their own stable config snapshots
     endpoints.push(String(input));
     if (endpoints.length === 1) {
       fs.writeFileSync(
-        path.join(cwd, '.claude', 'contextus.json'),
-        JSON.stringify({ providers: { ollama: { endpoint: 'http://reloaded.test' } } })
+        path.join(pluginRoot, 'plugin.json'),
+        JSON.stringify({
+          config: {
+            embedding: { provider: 'ollama', ollamaModel: 'shared-model', dimensions: 2 },
+            providers: { ollama: { endpoint: 'http://reloaded.test' } }
+          }
+        })
       );
       resetConfigCache();
     }
@@ -84,17 +92,14 @@ test('project and shared embedding batches use their own stable config snapshots
     const projectConfig = loadProjectConfig(projectHash(cwd), cwd);
     const projectContext = snapshotEmbeddingContext(projectConfig);
     const sharedContext = snapshotEmbeddingContext(loadConfig());
-    assert.equal(projectContext.providers.ollama.endpoint, 'http://project.test');
+    assert.equal(projectContext.providers.ollama.endpoint, 'http://global.test');
+    assert.equal(projectConfig.retrieval.topK, 6);
     assert.equal(sharedContext.providers.ollama.endpoint, 'http://global.test');
 
     await embedDocuments(['project row', 'another project row'], undefined, projectContext);
     await embedDocuments(['shared user row'], undefined, sharedContext);
 
-    assert.deepEqual(endpoints, [
-      'http://project.test/api/embeddings',
-      'http://project.test/api/embeddings',
-      'http://global.test/api/embeddings'
-    ]);
+    assert.deepEqual(endpoints, Array(3).fill('http://global.test/api/embeddings'));
   } finally {
     globalThis.fetch = oldFetch;
     if (oldHome === undefined) delete process.env.HOME;
