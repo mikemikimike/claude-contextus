@@ -129,6 +129,28 @@ test('project tiers reject embedding source overrides while preserving other pro
       );
       fs.writeFileSync(repo, '{}');
     }
+    for (const [tier, target] of [
+      ['local', local],
+      ['repo', repo]
+    ] as const) {
+      fs.writeFileSync(
+        target,
+        JSON.stringify({
+          embedding: {
+            transformers: {
+              localModelPath: './project-models'
+            }
+          }
+        })
+      );
+      resetConfigCache();
+      assert.throws(
+        () => loadProjectConfig(PROJ, cwd),
+        new RegExp(`cannot override embedding settings: transformers`),
+        `${tier} resolver overrides must not change the model artifacts for shared rows`
+      );
+      fs.writeFileSync(target, '{}');
+    }
     for (const tier of ['local', 'repo'] as const) {
       const target = tier === 'local' ? local : repo;
       fs.writeFileSync(

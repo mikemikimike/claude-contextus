@@ -400,6 +400,26 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
   let raw: Awaited<ReturnType<typeof search>>;
   let usedKeywordFallback = false;
   let embeddingFailed = false;
+  const recordEmbeddingFailure = (err: unknown, phase: 'query' | 'expansion'): void => {
+    if (embeddingFailed) return;
+    embeddingFailed = true;
+    const failure = err instanceof Error ? err.message : String(err);
+    modelLoaded = false;
+    warmupError = failure;
+    logError(
+      'warn',
+      'embedder',
+      phase === 'query'
+        ? 'Embedding failed, attempting keyword fallback + triggering re-warmup'
+        : 'Expansion embedding failed, triggering re-warmup',
+      {
+        project: projectLabel,
+        message: failure
+      }
+    );
+    if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
+    attemptWarmup();
+  };
   let hybridStatus: LastInjectionDebug['hybrid'] =
     cfg.retrieval.hybrid === 'off'
       ? 'off'
@@ -416,7 +436,7 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     try {
       vec = await embedQuery(prompt, embeddingContext);
     } catch (err) {
-      embeddingFailed = true;
+      recordEmbeddingFailure(err, 'query');
       throw err;
     }
     raw = await search(vec, fetchLimit, undefined, projectId, projectScope);
@@ -444,23 +464,8 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
     // hybrid === 'off': pure semantic, keyword only as error fallback (below)
   } catch (embedErr) {
     const failure = embedErr instanceof Error ? embedErr.message : String(embedErr);
-    if (embeddingFailed) {
-      // The embedding source is shared globally, so only an embedding failure
-      // should invalidate readiness. Corpus/search failures are project-scoped.
-      modelLoaded = false;
-      warmupError = failure;
-      logError(
-        'warn',
-        'embedder',
-        'Embedding failed, attempting keyword fallback + triggering re-warmup',
-        {
-          project: projectLabel,
-          message: failure
-        }
-      );
-      if (warmupRetryTimer) clearTimeout(warmupRetryTimer);
-      attemptWarmup();
-    } else {
+    if (!embeddingFailed) {
+      // Corpus/search failures are project-scoped and must not invalidate global readiness.
       logError('warn', 'retrieval', 'Vector retrieval failed, attempting keyword fallback', {
         project: projectLabel,
         message: failure
@@ -539,7 +544,13 @@ async function handleQuery(body: Record<string, unknown>, res: http.ServerRespon
       const variantLimit = cfg.retrieval.topK * 2;
       const variantSearches = await Promise.all(
         expanded.variants.map(async (variant) => {
-          const vVec = await embedQuery(variant, embeddingContext);
+          let vVec: number[];
+          try {
+            vVec = await embedQuery(variant, embeddingContext);
+          } catch (err) {
+            recordEmbeddingFailure(err, 'expansion');
+            throw err;
+          }
           return search(vVec, variantLimit, undefined, projectId, projectScope);
         })
       );

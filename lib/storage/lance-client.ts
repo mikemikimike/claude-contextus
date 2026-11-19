@@ -52,10 +52,13 @@ export function assertTableMetaCompatible(
 ): void {
   const meta = readTableMeta(projectName);
   if (!meta) {
-    if (requireMeta) throw new Error('Existing corpus has no readable embedding metadata; rebuild it before writing.');
+    if (requireMeta)
+      throw new Error(
+        'Existing corpus has no readable embedding metadata; rebuild it before writing.'
+      );
     return;
   }
-  const expectedModel = info.provider === 'ollama' ? info.ollamaModel ?? info.model : info.model;
+  const expectedModel = info.provider === 'ollama' ? (info.ollamaModel ?? info.model) : info.model;
   if (
     meta.provider !== info.provider ||
     meta.embeddingModel !== expectedModel ||
@@ -169,7 +172,12 @@ export async function createTable(
       // here as "it doesn't really exist yet" and fall through to create it
       // for real, rather than propagating a transient error for a table
       // that functionally never existed from the caller's point of view.
-      assertTableMetaCompatible(opts.providerInfo || loadConfig().embedding, rows[0].vector.length, opts.projectName, true);
+      assertTableMetaCompatible(
+        opts.providerInfo || loadConfig().embedding,
+        rows[0].vector.length,
+        opts.projectName,
+        true
+      );
       try {
         return await conn.openTable(TABLE_NAME);
       } catch {
@@ -238,13 +246,24 @@ async function sleep(ms: number): Promise<void> {
 
 let writeQueue: Promise<void> = Promise.resolve();
 
-export function upsertRows(rows: ContextRow[], projectName?: string, providerInfo?: ProviderInfo): Promise<void> {
+export function upsertRows(
+  rows: ContextRow[],
+  projectName?: string,
+  providerInfo?: ProviderInfo
+): Promise<void> {
   const operation = writeQueue.then(() => upsertRowsUnlocked(rows, projectName, providerInfo));
-  writeQueue = operation.then(() => undefined, () => undefined);
+  writeQueue = operation.then(
+    () => undefined,
+    () => undefined
+  );
   return operation;
 }
 
-async function upsertRowsUnlocked(rows: ContextRow[], projectName?: string, providerInfo?: ProviderInfo): Promise<void> {
+async function upsertRowsUnlocked(
+  rows: ContextRow[],
+  projectName?: string,
+  providerInfo?: ProviderInfo
+): Promise<void> {
   if (rows.length === 0) return;
   // Reuse the Table handle createTable() already returns when it just
   // created the table — do NOT discard it and immediately re-open via a
@@ -271,7 +290,13 @@ async function upsertRowsUnlocked(rows: ContextRow[], projectName?: string, prov
   for (let attempt = 0; attempt < 6; attempt++) {
     try {
       const exists = await tableExists(projectName);
-      if (exists) assertTableMetaCompatible(providerInfo || loadConfig().embedding, rows[0].vector.length, projectName, true);
+      if (exists)
+        assertTableMetaCompatible(
+          providerInfo || loadConfig().embedding,
+          rows[0].vector.length,
+          projectName,
+          true
+        );
       const table = exists
         ? await openTable(projectName)
         : await createTable(rows, { projectName, providerInfo });

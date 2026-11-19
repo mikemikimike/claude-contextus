@@ -204,14 +204,15 @@ All config files support comments and trailing commas. The system strips JSONC b
 - `model` / `ollamaModel` — Global embedding model identifier
 - `dimensions` — Global vector dimensions (must match the model, default: 768)
 
-The embedding source must remain in the global `plugin.json` configuration:
-provider, model, dimensions, Transformers.js resolver settings, and the Ollama
-endpoint used for embedding. Overrides in `~/.contextus/data/<project>/config.json`
-or `.claude/contextus.json[c]` are rejected at load time because project and
+The complete embedding source must remain in the global `plugin.json`
+configuration: provider, model, dimensions, Transformers.js resolver settings,
+and the Ollama endpoint used for embedding. Project-level overrides to these
+source settings in `~/.contextus/data/<project>/config.json` or
+`.claude/contextus.json[c]` are rejected because project, workspace-sibling, and
 shared user rows occupy one vector space. Project-level
 `providers.ollama.endpoint` values can still serve other Ollama features;
-embedding requests use the global endpoint. Non-source tuning such as batch size
-remains available per project.
+embedding requests use the global endpoint. Non-source tuning such as batch
+size remains available per project.
 
 **Sources:**
 - `projectContext.enabled` — Enable project `.claude/context/` (default: `true`)

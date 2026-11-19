@@ -56,7 +56,17 @@ test('project and shared embedding batches keep one global source snapshot acros
     path.join(pluginRoot, 'plugin.json'),
     JSON.stringify({
       config: {
-        embedding: { provider: 'ollama', ollamaModel: 'shared-model', dimensions: 2 },
+        embedding: {
+          provider: 'ollama',
+          ollamaModel: 'shared-model',
+          dimensions: 2,
+          transformers: {
+            localModelPath: './global-models',
+            cacheDir: './global-cache',
+            remoteHost: 'http://global-mirror.test',
+            allowRemoteModels: true
+          }
+        },
         providers: { ollama: { endpoint: 'http://global.test' } }
       }
     })
@@ -90,11 +100,26 @@ test('project and shared embedding batches keep one global source snapshot acros
   };
   try {
     const projectConfig = loadProjectConfig(projectHash(cwd), cwd);
+    projectConfig.embedding.transformers = {
+      localModelPath: './project-models',
+      cacheDir: './project-cache',
+      remoteHost: 'http://project-mirror.test',
+      allowRemoteModels: false
+    };
     const projectContext = snapshotEmbeddingContext(projectConfig);
     const sharedContext = snapshotEmbeddingContext(loadConfig());
     assert.equal(projectContext.providers.ollama.endpoint, 'http://global.test');
+    assert.equal(projectContext.embedding.provider, 'ollama');
+    assert.equal(projectContext.embedding.ollamaModel, 'shared-model');
+    assert.equal(projectContext.embedding.dimensions, 2);
+    assert.deepEqual(projectContext.embedding.transformers, sharedContext.embedding.transformers);
+    assert.equal(projectContext.embedding.transformers?.localModelPath, './global-models');
+    assert.equal(projectContext.embedding.transformers?.cacheDir, './global-cache');
+    assert.equal(projectContext.embedding.transformers?.remoteHost, 'http://global-mirror.test');
+    assert.equal(projectContext.embedding.transformers?.allowRemoteModels, true);
     assert.equal(projectConfig.retrieval.topK, 6);
     assert.equal(sharedContext.providers.ollama.endpoint, 'http://global.test');
+    assert.equal(sharedContext.embedding.transformers?.remoteHost, 'http://global-mirror.test');
 
     await embedDocuments(['project row', 'another project row'], undefined, projectContext);
     await embedDocuments(['shared user row'], undefined, sharedContext);

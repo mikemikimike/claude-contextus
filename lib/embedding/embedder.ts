@@ -40,7 +40,7 @@ function embeddingConfig(context?: EmbeddingContextSnapshot) {
   return (context ?? loadConfig()).embedding;
 }
 
-/** Keep project tuning while pinning vectors to the shared global embedding source. */
+/** Pin the complete embedding source globally for every shared-table operation. */
 export function snapshotEmbeddingContext(
   context?: EmbeddingContextSnapshot
 ): EmbeddingContextSnapshot {

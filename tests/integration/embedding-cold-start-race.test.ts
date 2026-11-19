@@ -9,11 +9,23 @@ test('concurrent cold-start writes cannot mix embedding models', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-race-'));
   const oldHome = process.env.HOME;
   process.env.HOME = home;
-  const { upsertRows, getContentHashes, readTableMeta, resetConnection } = await import('../../lib/storage/lance-client.js');
+  const { upsertRows, getContentHashes, readTableMeta, resetConnection } =
+    await import('../../lib/storage/lance-client.js');
   const row = (id: string): ContextRow => ({
-    id, project: 'project', vector: [1, 0], document: id, filename: id,
-    chunk_index: 0, heading: '', type: 'reference', source: 'projectDocs', tags: '',
-    hit_count: 0, last_hit: '', updated_at: '', content_hash: id
+    id,
+    project: 'project',
+    vector: [1, 0],
+    document: id,
+    filename: id,
+    chunk_index: 0,
+    heading: '',
+    type: 'reference',
+    source: 'projectDocs',
+    tags: '',
+    hit_count: 0,
+    last_hit: '',
+    updated_at: '',
+    content_hash: id
   });
   try {
     const results = await Promise.allSettled([

@@ -42,7 +42,7 @@ async function waitForReady(daemonUrl: string, daemon: ChildProcess): Promise<vo
   throw new Error('daemon did not finish its embedding warmup');
 }
 
-test('a project Ollama endpoint override cannot fail embeddings or clear global readiness', async () => {
+test('project endpoint and search failures preserve readiness while expansion embedding failures invalidate it', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-query-readiness-home-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'contextus-query-readiness-project-'));
   const pluginRoot = path.join(home, 'plugin');
@@ -50,6 +50,8 @@ test('a project Ollama endpoint override cannot fail embeddings or clear global 
 
   let projectRequests = 0;
   let globalEmbeddingRequests = 0;
+  let expansionRequests = 0;
+  let failEmbeddingAt = Number.POSITIVE_INFINITY;
   const embeddingServer = createServer((req, res) => {
     if (req.url?.startsWith('/project/')) {
       projectRequests++;
@@ -59,8 +61,19 @@ test('a project Ollama endpoint override cannot fail embeddings or clear global 
     }
     if (req.url?.endsWith('/api/embeddings')) {
       globalEmbeddingRequests++;
+      if (globalEmbeddingRequests >= failEmbeddingAt) {
+        res.writeHead(503);
+        res.end('provider unavailable after expansion variant');
+        return;
+      }
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ embedding: [1, 0] }));
+      return;
+    }
+    if (req.url?.endsWith('/api/generate')) {
+      expansionRequests++;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ response: 'find related project configuration' }));
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -210,10 +223,71 @@ test('a project Ollama endpoint override cannot fail embeddings or clear global 
     };
     assert.equal(recoveredHealth.modelLoaded, true);
     assert.equal(recoveredHealth.warmupError, null);
-    assert.ok(
-      globalEmbeddingRequests >= 3,
-      'the global endpoint must handle warmup and both queries'
+
+    await connection.dropTable('contextus');
+    await connection.createTable('contextus', [
+      {
+        id: `${projectId}:decision-test.md:0`,
+        project: projectId,
+        vector: [1, 0],
+        document: 'find related project configuration',
+        filename: 'decision-test.md',
+        chunk_index: 0,
+        heading: '',
+        type: 'decision',
+        source: 'projectContext',
+        tags: '',
+        hit_count: 0,
+        last_hit: '',
+        updated_at: new Date().toISOString(),
+        content_hash: 'readiness-expansion-test'
+      }
+    ]);
+    fs.writeFileSync(
+      path.join(project, '.claude', 'contextus.json'),
+      JSON.stringify({ expansion: { mode: 'always', maxVariants: 1 } })
     );
+    failEmbeddingAt = globalEmbeddingRequests + 2;
+    const expansionRequestsBeforeQuery = expansionRequests;
+    const expansionResponse = await fetch(`${daemonUrl}/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'find related project configuration',
+        project: projectId,
+        cwd: project
+      })
+    });
+    assert.equal(expansionResponse.status, 200);
+    assert.equal((await expansionResponse.json()).continue, true);
+    assert.ok(
+      expansionRequests > expansionRequestsBeforeQuery,
+      'query expansion should call the provider'
+    );
+    const rewarmDeadline = Date.now() + 5000;
+    while (globalEmbeddingRequests < failEmbeddingAt + 1 && Date.now() < rewarmDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    const failedHealthResponse = await fetch(`${daemonUrl}/health`);
+    const failedHealth = (await failedHealthResponse.json()) as {
+      modelLoaded: boolean;
+      warmupError: string | null;
+    };
+    assert.equal(failedHealth.modelLoaded, false);
+    assert.match(
+      failedHealth.warmupError ?? '',
+      /503 provider unavailable after expansion variant/
+    );
+    assert.ok(
+      globalEmbeddingRequests >= failEmbeddingAt + 1,
+      'a failed variant must trigger re-warmup'
+    );
+    const expansionErrorLog = fs.readFileSync(
+      path.join(home, '.contextus', 'logs', 'errors.jsonl'),
+      'utf8'
+    );
+    assert.match(expansionErrorLog, /Expansion embedding failed, triggering re-warmup/);
   } finally {
     if (daemon && daemon.exitCode === null) {
       const exited = new Promise<void>((resolve) => daemon!.once('exit', () => resolve()));

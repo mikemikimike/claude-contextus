@@ -566,7 +566,7 @@ function readConfigFile(filePath: string): Record<string, any> | null {
 function validateProjectEmbeddingConfig(config: Record<string, unknown>, filePath: string): void {
   const embedding = config.embedding;
   const restricted: string[] = [];
-  if (embedding && typeof embedding === 'object') {
+  if (embedding && typeof embedding === 'object' && !Array.isArray(embedding)) {
     restricted.push(
       ...[
         'provider',
